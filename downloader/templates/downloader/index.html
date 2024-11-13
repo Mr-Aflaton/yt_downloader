@@ -1,0 +1,121 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>YouTube Video Downloader</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-8">
+    <div class="max-w-3xl mx-auto bg-white p-8 rounded-lg shadow-md">
+        <h1 class="text-2xl font-bold mb-6 text-center">YouTube Video Downloader</h1>
+        
+        <!-- URL Input Form -->
+        <form method="post" class="mb-6">
+            {% csrf_token %}
+            <div class="flex">
+                <input 
+                    type="url" 
+                    name="url" 
+                    placeholder="Enter YouTube URL" 
+                    required 
+                    class="flex-grow p-2 border rounded-l-md"
+                    value="{{ request.POST.url }}"
+                >
+                <button 
+                    type="submit" 
+                    class="bg-blue-500 text-white p-2 rounded-r-md hover:bg-blue-600"
+                >
+                    Get Formats
+                </button>
+            </div>
+        </form>
+
+        <!-- Messages -->
+        {% if messages %}
+            <div class="mb-4">
+                {% for message in messages %}
+                    <div class="p-4 
+                        {% if message.tags == 'error' %}bg-red-100 text-red-700
+                        {% else %}bg-green-100 text-green-700{% endif %} 
+                        rounded">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+
+        <!-- Video Details and Download Options -->
+        {% if title %}
+            <div class="bg-gray-50 p-6 rounded-md">
+                <h2 class="text-xl font-semibold mb-4">{{ title }}</h2>
+                
+                <!-- Thumbnail -->
+                {% if thumbnail %}
+                    <img 
+                        src="{{ thumbnail }}" 
+                        alt="Video Thumbnail" 
+                        class="w-full h-48 object-cover rounded-md mb-4"
+                    >
+                {% endif %}
+
+                <!-- Available Formats -->
+                <div class="mb-4">
+                    <h3 class="font-bold mb-2">Available Formats</h3>
+                    
+                    <table class="w-full border-collapse">
+                        <thead class="bg-gray-200">
+                            <tr>
+                                <th class="p-2 text-left">Type</th>
+                                <th class="p-2 text-left">Resolution</th>
+                                <th class="p-2 text-left">Extension</th>
+                                <th class="p-2 text-left">Size</th>
+                                <th class="p-2 text-left">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for format in formats %}
+                                <tr class="border-b">
+                                    <td class="p-2">
+                                        {% if format.type == 'video' %}
+                                            <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">Video</span>
+                                        {% elif format.type == 'audio' %}
+                                            <span class="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">Audio</span>
+                                        {% elif format.type == 'video_with_audio' %}
+                                            <span class="bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs">Video+Audio</span>
+                                        {% else %}
+                                            <span class="bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs">Unknown</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="p-2">{{ format.resolution }}</td>
+                                    <td class="p-2">{{ format.ext }}</td>
+                                    <td class="p-2">{{ format.filesize }}</td>
+                                    <td class="p-2">
+                                        <form method="post" action="{% url 'download' %}" class="inline">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="url" value="{{ url }}">
+                                            <input type="hidden" name="format_id" value="{{ format.format_id }}">
+                                            <button 
+                                                type="submit" 
+                                                class="
+                                                    {% if format.type == 'video_with_audio' %}bg-purple-500 hover:bg-purple-600
+                                                    {% elif format.type == 'video' %}bg-blue-500 hover:bg-blue-600
+                                                    {% elif format.type == 'audio' %}bg-green-500 hover:bg-green-600
+                                                    {% else %}bg-gray-500 hover:bg-gray-600
+                                                    {% endif %}
+                                                    text-white px-3 py-1 rounded text-sm"
+                                            >
+                                                Download
+                                            </button>
+                                        </form>
+                                    </td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</body>
+</html>
