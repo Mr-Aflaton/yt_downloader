@@ -206,7 +206,7 @@ def merge_video_audio(video_path: str, audio_path: str, output_path: str) -> boo
             '-y',
             output_path
         ]
-        result = subprocess.run(ffmpeg_command, check_output=True, text=True)
+        result = subprocess.run(ffmpeg_command, text=True)
         if result.returncode == 0:
             return True
         else:
