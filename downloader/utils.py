@@ -6,7 +6,10 @@ from django.http import FileResponse
 from django.shortcuts import render
 from django.contrib import messages
 import yt_dlp
+import json
+import ffmpeg
 
+download_progress = {}
 
 def validate_youtube_url(url: str) -> str:
     """validates the url put by the user.
@@ -126,21 +129,74 @@ def extract_video_info(url: str) -> dict:
 def download_video(url: str, format_id: str, download_dir: str, audio_format_id: str = None) -> tuple:
     """
     Download video after use selects format and resolution
-    
-    Args:
-        url (str): YouTube video link
-        format_id (str): format id (from the extracted info)
-
-    Returns:
-        tuple: Path to downloaded video and audio files (or None)
     """
-    
     try:
+        download_id = f"{url}_{format_id}+{audio_format_id}"
+
+        def progress_hook(d):
+            if d['status'] == 'downloading':
+                try:
+                    total = d.get('total_bytes', 0) or d.get('total_bytes_estimate', 0)
+                    downloaded = d.get('downloaded_bytes', 0)
+                    if total > 0:
+                        
+                        
+                        base_percentage = 45 if audio_format_id else 100
+                        percentage = (downloaded / total) * base_percentage
+                        
+                        
+                        stage = download_progress[download_id].get('stage', 'video')
+                        if stage == 'audio':
+                            percentage += 45  
+                        
+                        download_progress[download_id].update({
+                            'status': 'downloading',
+                            'progress': percentage,
+                            'speed': d.get('speed', 0),
+                            'eta': d.get('eta', 0),
+                            'stage': stage
+                        })
+                except:
+                    pass
+            elif d['status'] == 'finished':
+                stage = download_progress[download_id].get('stage', 'video')
+                if stage == 'video' and audio_format_id:
+                    
+                    download_progress[download_id].update({
+                        'status': 'downloading',
+                        'progress': 45,
+                        'stage': 'audio'
+                    })
+                elif stage == 'audio':
+                    
+                    download_progress[download_id].update({
+                        'status': 'downloading',
+                        'progress': 90,
+                        'stage': 'merging'
+                    })
+                else:
+                    
+                    download_progress[download_id].update({
+                        'status': 'finished',
+                        'progress': 100,
+                        'stage': 'complete'
+                    })
+
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
             'format': format_id,
             'outtmpl': os.path.join(download_dir, '%(title)s_video.%(ext)s'),
+            'progress_hooks': [progress_hook],
+        }
+        
+        
+        download_progress[download_id] = {
+            'status': 'downloading',
+            'progress': 0,
+            'stage': 'video',
+            'speed': 0,
+            'eta': 0
         }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -148,7 +204,6 @@ def download_video(url: str, format_id: str, download_dir: str, audio_format_id:
             video_filename = ydl.prepare_filename(info_dict)
         
         audio_filename = None
-        
         if audio_format_id:
             ydl_opts['format'] = audio_format_id
             ydl_opts['outtmpl'] = os.path.join(download_dir, '%(title)s_audio.%(ext)s')
@@ -161,7 +216,13 @@ def download_video(url: str, format_id: str, download_dir: str, audio_format_id:
     
     except Exception as e:
         print(f"Download error: {traceback.format_exc()}")
+        download_progress[download_id] = {
+            'status': 'error',
+            'error': str(e)
+        }
         return None, None
+
+
 
 def get_filesize(size: float) -> float:
     """
@@ -181,38 +242,114 @@ def get_filesize(size: float) -> float:
             return f"{size:.2f} {unit}"
         size /= 1024.0
 
-def merge_video_audio(video_path: str, audio_path: str, output_path: str) -> bool:
+
+def merge_video_audio(video_path: str, audio_path: str, output_path: str, download_id: str) -> bool:
     """
-    merge video and audio using ffmpeg
-    
-    Args:
-        video_path (str): video path
-        audio_path (str): audio path
-        output_path (str): output path
-    
-    Returns:
-        bool: is it merged successfully?
+    Merge video and audio using ffmpeg-python
     """
     try:
-        ffmpeg_command = [
-            'ffmpeg',
-            '-i', video_path,
-            '-i', audio_path,
-            '-c:v', 'copy',
-            '-c:a', 'aac',
-            # '-strict', 'experimental',
-            '-preset', 'ultrafast',
-            '-threads', '4',
-            '-y',
-            output_path
-        ]
-        result = subprocess.run(ffmpeg_command, text=True)
-        if result.returncode == 0:
-            return True
-        else:
-            print(f"FFmpeg error: {result.stderr}")
-            return False
+        
+        if download_id in download_progress:
+            download_progress[download_id].update({
+                'status': 'downloading',
+                'progress': 90,
+                'stage': 'merging'
+            })
+
+        video = ffmpeg.input(video_path)
+        audio = ffmpeg.input(audio_path)
+        print(video_path, audio_path)
+        stream = ffmpeg.output(
+            video,
+            audio,
+            output_path,
+            vcodec='copy',
+            acodec='aac',
+            preset='ultrafast',
+            threads=4,
+            loglevel='quiet'
+        )
+        try:
+            ffmpeg.run(stream, overwrite_output=True, capture_stderr=True)
+        except Exception as e:
+            print(e)
+            print(traceback.format_exc())
+        
+        if download_id in download_progress:
+            download_progress[download_id].update({
+                'status': 'finished',
+                'progress': 100,
+                'stage': 'complete'
+            })
+
+        return True
     
     except Exception as e:
+        print(e)
         print(f"Merge error: {traceback.format_exc()}")
+        if download_id in download_progress:
+            download_progress[download_id].update({
+                'status': 'error',
+                'error': 'Merging failed: ' + str(e)
+            })
         return False
+
+def extract_playlist_info(url: str) -> dict:
+    """
+    Extracts information about all videos in a playlist
+    
+    Args:
+        url (str): YouTube playlist URL
+    
+    Returns:
+        dict: Playlist information or None if error
+    """
+    try:
+        ydl_opts = {
+            'quiet': True,
+            
+            'extract_flat': True,
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info_dict = ydl.extract_info(url, download=False)
+            
+            if 'entries' not in info_dict:
+                info_dict = ydl.extract_info(info_dict['url'], download=False)
+                print(json.dumps(info_dict, indent=4 ))                
+                
+                if 'entries' not in info_dict:
+                    return None
+                
+                
+            playlist_details = {
+                'title': info_dict.get('title', 'Unknown Playlist'),
+                'videos': []
+            }
+            
+            for idx, entry in enumerate(info_dict['entries'], 1):
+                video_info = {
+                    'title': entry.get('title', 'Unknown Title'),
+                    'url': f"https://www.youtube.com/watch?v={entry['id']}",
+                    'thumbnail': entry.get('thumbnail', ''),
+                    'position': idx
+                }
+                playlist_details['videos'].append(video_info)
+                
+            return playlist_details
+    
+    except Exception as e:
+        print(f"Error extracting playlist info: {traceback.format_exc()}")
+        return None
+
+def is_playlist_url(url: str) -> bool:
+    """
+    Check if URL is a playlist
+    
+    Args:
+        url (str): YouTube URL
+    
+    Returns:
+        bool: True if playlist URL
+    """
+    return 'playlist' in url or '&list=' in url

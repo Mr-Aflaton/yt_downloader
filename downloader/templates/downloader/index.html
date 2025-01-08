@@ -10,7 +10,8 @@
     <div class="max-w-3xl mx-auto bg-white p-8 rounded-lg shadow-md">
         <h1 class="text-2xl font-bold mb-6 text-center">YouTube Video Downloader</h1>
         
-        <!-- URL Input Form -->
+        
+
         <form method="post" class="mb-6">
             {% csrf_token %}
             <div class="flex">
@@ -31,7 +32,104 @@
             </div>
         </form>
 
-        <!-- Messages -->
+        {% if playlist %}
+            <div class="mt-8">
+                <h2 class="text-xl font-semibold mb-4">{{ playlist.title }}</h2>
+                
+                
+                
+                <div id="downloadProgress" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full" onclick="closeModalOnBackgroundClick(event, 'downloadProgress')">
+                    <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+                        <div class="mt-3 text-center">
+                            <h3 class="text-lg leading-6 font-medium text-gray-900">Download Progress</h3>
+                            <div class="mt-2 px-7 py-3">
+                                <p id="progressText">Downloading videos...</p>
+                                <div class="mt-4 bg-gray-200 rounded-full h-2.5 dark:bg-gray-700">
+                                    <div id="progressBar" class="bg-blue-600 h-2.5 rounded-full" style="width: 0%"></div>
+                                </div>
+                                <p id="progressDetails" class="mt-2 text-sm text-gray-500"></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mb-4">
+                    <div class="flex gap-2">
+                        <button onclick="startDownload('video')" class="bg-blue-500 text-white px-4 py-2 rounded">
+                            Download All as Videos
+                        </button>
+                        <button onclick="startDownload('audio')" class="bg-green-500 text-white px-4 py-2 rounded">
+                            Download All as Audio
+                        </button>
+                    </div>
+                </div>
+                
+                
+            </div>
+
+            <script>
+                let downloadInterval;
+                
+                function startDownload(formatType) {
+                    // Show progress modal
+                    document.getElementById('downloadProgress').classList.remove('hidden');
+                    
+                    // Start download
+                    fetch('{% url "download_playlist" %}', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded',
+                            'X-CSRFToken': '{{ csrf_token }}'
+                        },
+                        body: `playlist_id={{ playlist_id }}&format_type=${formatType}`
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'started') {
+                            // Start checking progress
+                            checkProgress();
+                            downloadInterval = setInterval(checkProgress, 1000);
+                        }
+                    });
+                }
+                
+                function checkProgress() {
+                    fetch('{% url "check_progress" %}', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-CSRFToken': '{{ csrf_token }}'
+                        },
+                        body: JSON.stringify({
+                            playlist_id: '{{ playlist_id }}'
+                        })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        const progress = (data.current / data.total) * 100;
+                        document.getElementById('progressBar').style.width = `${progress}%`;
+                        document.getElementById('progressDetails').textContent = 
+                            `${data.current} of ${data.total} videos downloaded`;
+                        
+                        if (data.status === 'completed') {
+                            clearInterval(downloadInterval);
+                            document.getElementById('progressText').textContent = 'Download completed!';
+                            if (data.download_url) {
+                                window.location.href = data.download_url;
+                                setTimeout(() => {
+                                    document.getElementById('downloadProgress').classList.add('hidden');
+                                }, 2000);
+                            }
+                        } else if (data.status === 'failed') {
+                            clearInterval(downloadInterval);
+                            document.getElementById('progressText').textContent = 'Download failed!';
+                        }
+                    });
+                }
+            </script>
+        {% endif %}
+
+        
         {% if messages %}
             <div class="mb-4">
                 {% for message in messages %}
@@ -45,77 +143,224 @@
             </div>
         {% endif %}
 
-        <!-- Video Details and Download Options -->
-        {% if title %}
-            <div class="bg-gray-50 p-6 rounded-md">
-                <h2 class="text-xl font-semibold mb-4">{{ title }}</h2>
-                
-                <!-- Thumbnail -->
-                {% if thumbnail %}
-                    <img 
-                        src="{{ thumbnail }}" 
-                        alt="Video Thumbnail" 
-                        class="w-full h-48 object-cover rounded-md mb-4"
-                    >
+        {% if history %}
+        <div class="mt-8">
+            <h2 class="text-xl font-semibold mb-4">Recent History</h2>
+            <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+                {% for item in history %}
+                    <div class="bg-white p-4 rounded-lg shadow">
+                        <img src="{{ item.thumbnail }}" alt="{{ item.title }}" class="w-full h-32 object-cover rounded mb-2">
+                        <h3 class="font-medium text-sm mb-2">{{ item.title }}</h3>
+                        <div class="flex justify-between items-center">
+                            <span class="text-xs text-gray-500">{{ item.lookup_date|date:"M d, Y" }}</span>
+                            <a href="?url={{ item.url }}" class="text-blue-500 text-sm">Download</a>
+                        </div>
+                    </div>
+                {% endfor %}
+            </div>
+            
+            
+            <div class="mt-4 flex justify-center">
+                {% if history.has_previous %}
+                    <a href="?page={{ history.previous_page_number }}" class="px-3 py-1 bg-gray-200 rounded mr-2">&laquo; Previous</a>
                 {% endif %}
+                
+                <span class="px-3 py-1">
+                    Page {{ history.number }} of {{ history.paginator.num_pages }}
+                </span>
+                
+                {% if history.has_next %}
+                    <a href="?page={{ history.next_page_number }}" class="px-3 py-1 bg-gray-200 rounded ml-2">Next &raquo;</a>
+                {% endif %}
+            </div>
+        </div>
+        {% endif %}
 
-                <!-- Available Formats -->
-                <div class="mb-4">
-                    <h3 class="font-bold mb-2">Available Formats</h3>
-                    
-                    <table class="w-full border-collapse">
-                        <thead class="bg-gray-200">
-                            <tr>
-                                <th class="p-2 text-left">Type</th>
-                                <th class="p-2 text-left">Resolution</th>
-                                <th class="p-2 text-left">Extension</th>
-                                <th class="p-2 text-left">Size</th>
-                                <th class="p-2 text-left">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {% for format in formats %}
-                                <tr class="border-b">
-                                    <td class="p-2">
-                                        {% if format.type == 'video' %}
-                                            <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">Video</span>
-                                        {% elif format.type == 'audio' %}
-                                            <span class="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">Audio</span>
-                                        {% elif format.type == 'video_with_audio' %}
-                                            <span class="bg-purple-100 text-purple-800 px-2 py-1 rounded text-xs">Video+Audio</span>
-                                        {% else %}
-                                            <span class="bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs">Unknown</span>
-                                        {% endif %}
-                                    </td>
-                                    <td class="p-2">{{ format.resolution }}</td>
-                                    <td class="p-2">{{ format.ext }}</td>
-                                    <td class="p-2">{{ format.filesize }}</td>
-                                    <td class="p-2">
-                                        <form method="post" action="{% url 'download' %}" class="inline">
-                                            {% csrf_token %}
-                                            <input type="hidden" name="url" value="{{ url }}">
-                                            <input type="hidden" name="format_id" value="{{ format.format_id }}">
-                                            <button 
-                                                type="submit" 
-                                                class="
-                                                    {% if format.type == 'video_with_audio' %}bg-purple-500 hover:bg-purple-600
-                                                    {% elif format.type == 'video' %}bg-blue-500 hover:bg-blue-600
-                                                    {% elif format.type == 'audio' %}bg-green-500 hover:bg-green-600
-                                                    {% else %}bg-gray-500 hover:bg-gray-600
-                                                    {% endif %}
-                                                    text-white px-3 py-1 rounded text-sm"
-                                            >
-                                                Download
-                                            </button>
-                                        </form>
-                                    </td>
-                                </tr>
-                            {% endfor %}
-                        </tbody>
-                    </table>
+        {% if title %}
+    <div class="bg-gray-50 p-6 rounded-md">
+        <h2 class="text-xl font-semibold mb-4">{{ title }}</h2>
+        
+        
+        
+        <div id="singleDownloadProgress" class="hidden fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full z-50" onclick="closeModalOnBackgroundClick(event, 'singleDownloadProgress')">
+            <div class="relative top-20 mx-auto p-5 border w-96 shadow-lg rounded-md bg-white">
+                <div class="mt-3 text-center">
+                    <h3 class="text-lg leading-6 font-medium text-gray-900">Download Progress</h3>
+                    <div class="mt-2 px-7 py-3">
+                        <p id="singleProgressText">Downloading...</p>
+                        <div class="mt-4 bg-gray-200 rounded-full h-2.5 dark:bg-gray-700">
+                            <div id="singleProgressBar" class="bg-blue-600 h-2.5 rounded-full" style="width: 0%"></div>
+                        </div>
+                        <p id="singleProgressDetails" class="mt-2 text-sm text-gray-500"></p>
+                    </div>
                 </div>
             </div>
+        </div>
+
+        
+        {% if thumbnail %}
+            <img 
+                src="{{ thumbnail }}" 
+                alt="Video Thumbnail" 
+                class="w-full h-48 object-cover rounded-md mb-4"
+            >
         {% endif %}
+
+        
+        <div class="mb-4">
+            <h3 class="font-bold mb-2">Available Formats</h3>
+            
+            <table class="w-full border-collapse">
+                <thead class="bg-gray-200">
+                    <tr>
+                        <th class="p-2 text-left">Type</th>
+                        <th class="p-2 text-left">Resolution</th>
+                        <th class="p-2 text-left">Extension</th>
+                        <th class="p-2 text-left">Size</th>
+                        <th class="p-2 text-left">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for format in formats %}
+                        <tr class="border-b">
+                            <td class="p-2">
+                                {% if format.type == 'video' %}
+                                    <span class="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">Video</span>
+                                {% elif format.type == 'audio' %}
+                                    <span class="bg-green-100 text-green-800 px-2 py-1 rounded text-xs">Audio</span>
+                                {% else %}
+                                    <span class="bg-gray-100 text-gray-800 px-2 py-1 rounded text-xs">Unknown</span>
+                                {% endif %}
+                            </td>
+                            <td class="p-2">{{ format.resolution }}</td>
+                            <td class="p-2">{{ format.ext }}</td>
+                            <td class="p-2">{{ format.filesize }}</td>
+                            <td class="p-2">
+                                <form method="post" action="{% url 'download' %}" class="inline" onsubmit="return startSingleDownload(this, '{{ url }}')">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="url" value="{{ url }}">
+                                    <input type="hidden" name="format_id" value="{{ format.format_id }}">
+                                    <button 
+                                        type="submit" 
+                                        class="
+                                            {% if format.type == 'video' %}bg-blue-500 hover:bg-blue-600
+                                            {% elif format.type == 'audio' %}bg-green-500 hover:bg-green-600
+                                            {% else %}bg-gray-500 hover:bg-gray-600
+                                            {% endif %}
+                                            text-white px-3 py-1 rounded text-sm"
+                                    >
+                                        Download
+                                    </button>
+                                </form>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
     </div>
+
+    
+    <script>
+    let singleDownloadInterval;
+
+function startSingleDownload(form, url) {
+    const formatId = form.querySelector('input[name="format_id"]').value;
+    const downloadId = `${url}_${formatId}`;
+
+    // Show progress modal
+    document.getElementById('singleDownloadProgress').classList.remove('hidden');
+    document.getElementById('singleProgressText').textContent = 'Starting download...';
+    document.getElementById('singleProgressBar').style.width = '0%';
+    document.getElementById('singleProgressDetails').textContent = '';
+    
+    // Start progress checking
+    checkSingleProgress(downloadId);
+    singleDownloadInterval = setInterval(() => checkSingleProgress(downloadId), 1000);
+    
+    // Submit the form normally in a hidden iframe to handle the download
+    const iframe = document.createElement('iframe');
+    iframe.style.display = 'none';
+    document.body.appendChild(iframe);
+    
+    form.target = 'download_iframe';
+    iframe.name = 'download_iframe';
+    form.submit();
+
+    return false;
+}
+
+function checkSingleProgress(downloadId) {
+    fetch('{% url "check_video_progress" %}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token }}'
+        },
+        body: JSON.stringify({ download_id: downloadId })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'downloading') {
+            document.getElementById('singleProgressBar').style.width = `${data.progress}%`;
+            document.getElementById('singleProgressDetails').textContent = 
+                `${data.progress.toFixed(1)}% complete`;
+            
+            let statusText = 'Downloading...';
+            if (data.stage === 'video') {
+                statusText = 'Downloading video...';
+            } else if (data.stage === 'audio') {
+                statusText = 'Downloading audio...';
+            } else if (data.stage === 'merging') {
+                statusText = 'Merging video and audio...';
+            }
+
+            if (data.speed && data.eta && data.stage !== 'merging') {
+                const speed = (data.speed / 1024 / 1024).toFixed(2);
+                statusText += ` ${speed} MB/s (${data.eta}s remaining)`;
+            }
+            
+            document.getElementById('singleProgressText').textContent = statusText;
+        } else if (data.status === 'finished' || data.status === 'completed') {
+            clearInterval(singleDownloadInterval);
+            document.getElementById('singleProgressText').textContent = 'Download completed!';
+            document.getElementById('singleProgressBar').style.width = '100%';
+            document.getElementById('singleProgressDetails').textContent = '100% complete';
+            
+            setTimeout(() => {
+                document.getElementById('singleDownloadProgress').classList.add('hidden');
+            }, 2000);
+        } else if (data.status === 'error') {
+            clearInterval(singleDownloadInterval);
+            document.getElementById('singleProgressText').textContent = 'Download failed!';
+            document.getElementById('singleProgressDetails').textContent = data.error || 'Unknown error occurred';
+        }
+    })
+    .catch(error => {
+        clearInterval(singleDownloadInterval);
+        document.getElementById('singleProgressText').textContent = 'Progress check failed!';
+        document.getElementById('singleProgressDetails').textContent = error.message;
+    });
+}
+
+function closeModalOnBackgroundClick(event, modalId) {
+    if (event.target.id === modalId) {
+        const progressText = modalId === 'singleDownloadProgress' 
+            ? document.getElementById('singleProgressText').textContent
+            : document.getElementById('progressText').textContent;
+            
+        if (!progressText.includes('Downloading')) {
+            document.getElementById(modalId).classList.add('hidden');
+            
+            if (modalId === 'singleDownloadProgress' && singleDownloadInterval) {
+                clearInterval(singleDownloadInterval);
+            } else if (modalId === 'downloadProgress' && downloadInterval) {
+                clearInterval(downloadInterval);
+            }
+        }
+    }
+}
+    </script>
+{% endif %}
 </body>
 </html>
